@@ -17,10 +17,11 @@ Modifications to the original Mihalcea algorithm include:
 
 This code has dependencies on several other Python projects:
 
-  * [NLTK](http://www.nltk.org/)
   * [TextBlob](http://textblob.readthedocs.io/)
   * [NetworkX](http://networkx.readthedocs.io/)
   * [datasketch](https://github.com/ekzhu/datasketch)
+  * [graphviz](https://pypi.python.org/pypi/graphviz)
+  * [matlibplot](http://matplotlib.org/)
 
 To install:
 
@@ -29,8 +30,12 @@ To install:
     pip install -U git+https://github.com/sloria/textblob-aptagger.git@dev
     sudo python -m nltk.downloader punkt
     sudo python -m nltk.downloader wordnet
+    sudo python -m textblob.download_corpora
+    pip install networkx
+    pip install statistics
     pip install datasketch -U
-
+    pip install graphviz
+    pip install matplotlib
 
 ## Example Usage
 
@@ -42,21 +47,17 @@ Run a test case based on the Mihalcea paper:
 That test case should result as:
 
 ```
-0.2230	  minimal supporting set
-0.1345	  types systems
-0.1339	  linear diophantine equations
-0.0802	  mixed types
-0.0541	  strict inequations
-0.0505	  nonstrict inequations
-0.0368	  linear constraints
-0.0356	  natural numbers
-0.0252	  corresponding algorithms
-0.0116	  upper bounds
-0.0091	  solutions
-0.0027	  components
-0.0025	  construction
-0.0014	  compatibility
-0.0010	  criteria
+0.0956	types systems
+0.0627	nonstrict inequations
+0.0622	minimal supporting set
+0.0596	mixed types
+0.0571	strict inequations
+0.0568	natural numbers
+0.0568	minimal set
+0.0545	linear diophantine equations
+0.0539	linear constraints
+0.0528	corresponding algorithms
+0.0474	upper bounds
 ```
 
 Run another test based on [Williams](http://mike.place/2016/summarization/), using text from a
@@ -70,9 +71,10 @@ article:
 
 Which produces as a summary:
 
-> **excerpts:** After more than four hours of tight play and a rapid-fire endgame, Google's artificially intelligent Go-playing computer system has won a second contest against grandmaster Lee Sedol, taking a two-games-to-none lead in their historic best-of-five match in downtown Seoul. The Korean-born Lee Sedol will go down in defeat unless he takes each of the match's last three games. Lee Sedol is widely-regarded as the top Go player of the last decade, after winning more international titles than all but one other player. Although AlphaGo topped Lee Sedol in the match's first game on Wednesday afternoon, the outcome of Game Two was no easier to predict.
+> **excerpts:** After more than four hours of tight play and a rapid-fire endgame, Google's artificially intelligent Go-playing computer system has won a second contest against grandmaster Lee Sedol, taking a two-games-to-none lead in their historic best-of-five match in downtown Seoul. The surprisingly skillful Google machine, known as AlphaGo, now needs only one more win to claim victory in the match. The Korean-born Lee Sedol will go down in defeat unless he takes each of the match's last three games. Lee Sedol is widely-regarded as the top Go player of the last decade, after winning more international titles than all but one other player. Although AlphaGo topped Lee Sedol in the match's first game on Wednesday afternoon, the outcome of Game Two was no easier to predict.
 
-> **keywords:** first game; second game; lee sedol; all-important match; eight-day match; wednesday afternoon; more win; alphago technique; seasons hotel; korean-born lee sedol; google ai lab; grandmaster lee sedol; skillful google machine
+> **keywords:** second game; all-important match; more win; seasons hotel; grandmaster lee sedol; alphago technique; wednesday afternoon; skillful google machine; downtown seoul; saturday afternoon; first time; first game; lee sedol
+
 
 These results show a summarization similar to slide 30 of the talk; 
 however, this approach is more amenable to:
@@ -80,15 +82,22 @@ however, this approach is more amenable to:
   * bootstrapping work with new documents about a specific topic
   * producing results ready for use in a search engine or recommender system
 
+## NB: Unicode
+
+Note the `force_encode` flags on some of the function calls.
+This forces `utf-8` encoding, in case the input has characters that couldn't be handled otherwise.
+That may require some post-processing for your use cases -- 
+see examples functions in the `stage4.py` code.
+This is **turned off** by default.
+
 ## TODO: Stay tuned for more...
 
-  1. Integrate [sent2vec](https://github.com/ryankiros/skip-thoughts) encoder
-  2. Integrate [keras](https://keras.io/) for RNN (deep learning)
-  3. LSH for building doc-to-doc graph of semantic similarity (per chapter-ish)
-  4. Docker container for managing the installation/dependencies
+  1. Docker container for managing the installation/dependencies
 
 ## Kudos
 
-[@htmartin](https://github.com/htmartin),
-[@williamsmj](https://github.com/williamsmj/),
+[@htmartin](https://github.com/htmartin)
+[@williamsmj](https://github.com/williamsmj/)
 [@mattkohl](https://github.com/mattkohl)
+[@HarshGrandeur](https://github.com/HarshGrandeur)
+[@mnowotka](https://github.com/mnowotka)

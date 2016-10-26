@@ -3,6 +3,7 @@
 
 from collections import namedtuple
 from datasketch import MinHash
+from graphviz import Digraph
 import hashlib
 import json
 import math
@@ -18,7 +19,7 @@ DEBUG = False # True
 
 ParsedGraf = namedtuple('ParsedGraf', 'id, sha1, graf')
 WordNode = namedtuple('WordNode', 'word_id, raw, root, pos, keep, idx')
-RankedLexeme = namedtuple('RankedLexeme', 'text, rank, ids, pos')
+RankedLexeme = namedtuple('RankedLexeme', 'text, rank, ids, pos, count')
 SummarySent = namedtuple('SummarySent', 'dist, idx, text')
 
 
@@ -121,7 +122,7 @@ def get_word_id (root):
   return UNIQ_WORDS[root]
 
 
-def parse_graf (doc_id, graf_text, base_idx):
+def parse_graf (doc_id, graf_text, base_idx, force_encode=False):
   """CORE ALGORITHM: parse and markup sentences in the given paragraph"""
 
   global DEBUG
@@ -160,19 +161,36 @@ def parse_graf (doc_id, graf_text, base_idx):
         pos_family = pos_tag[1].lower()[0]
         raw_idx += 1
 
-      word = word._replace(raw = str(parsed_raw))
+      if force_encode:
+        word = word._replace(raw = str(parsed_raw).encode('utf-8'))
+      else:
+        word = word._replace(raw = str(parsed_raw))
 
       if pos_family in POS_LEMMA:
-        word = word._replace(root = str(parsed_raw.singularize().lemmatize(pos_family)).lower())
+        if force_encode:
+          word = word._replace(root = str(parsed_raw.singularize().lemmatize(pos_family).encode('utf-8')).lower())
+        else:
+          word = word._replace(root = str(parsed_raw.singularize().lemmatize(pos_family)).lower())
+
       elif pos_family != '.':
-        word = word._replace(root = str(parsed_raw).lower())
+        if force_encode:
+          word = word._replace(root = str(parsed_raw.encode('utf-8')).lower())
+        else:
+          word = word._replace(root = str(parsed_raw).lower())
       else:
-        word = word._replace(root = str(parsed_raw))
+        if force_encode:
+          word = word._replace(root = str(parsed_raw.encode('utf-8')))
+        else:
+          word = word._replace(root = str(parsed_raw))
 
       if pos_family in POS_KEEPS:
         word = word._replace(word_id = get_word_id(word.root), keep = 1)
 
-      digest.update(word.root.encode("utf-8"))
+      if force_encode:
+        # already encoded...
+        digest.update(word.root)
+      else:
+        digest.update(word.root.encode('utf-8'))
 
       # schema: word_id, raw, root, pos, keep, idx
       if DEBUG:
@@ -188,7 +206,7 @@ def parse_graf (doc_id, graf_text, base_idx):
   return markup, new_base_idx
 
 
-def parse_doc (json_iter):
+def parse_doc (json_iter, force_encode=False):
   """parse one document to prep for TextRank"""
 
   global DEBUG
@@ -200,7 +218,7 @@ def parse_doc (json_iter):
       if DEBUG:
         print("graf_text:", graf_text)
 
-      grafs, new_base_idx = parse_graf(meta["id"], graf_text, base_idx)
+      grafs, new_base_idx = parse_graf(meta["id"], graf_text, base_idx, force_encode)
       base_idx = new_base_idx
 
       for graf in grafs:
@@ -253,22 +271,23 @@ def build_graph (json_iter):
   return graph
 
 
-def text_rank (path):
-  """run the TextRank algorithm"""
+def write_dot (graph, ranks, path="graph.dot"):
+  """output the graph in Dot file format"""
 
-  global DEBUG
+  dot = Digraph()
 
-  graph = build_graph(json_iter(path))
-  ranks = nx.pagerank(graph)
+  for node in graph.nodes():
+    dot.node(node, "%s %0.3f" % (node, ranks[node]))
 
-  if DEBUG:
-    render_ranks(graph, ranks)
+  for edge in graph.edges():
+    dot.edge(edge[0], edge[1], constraint="false")
 
-  return graph, ranks
+  with open(path, 'w') as f:
+    f.write(dot.source)
 
 
-def render_ranks (graph, ranks, img_file="graph.png", show_img=None):
-  """render the TextRank graph as an image"""
+def render_ranks (graph, ranks, img_file="graph.png", dot_file="graph.dot", show_img=None):
+  """render the TextRank graph for visual formats"""
 
   nx.draw_networkx(graph)
 
@@ -277,6 +296,20 @@ def render_ranks (graph, ranks, img_file="graph.png", show_img=None):
 
   if show_img:
     plt.show()
+
+  if dot_file:
+    write_dot(graph, ranks, path=dot_file)
+
+
+def text_rank (path):
+  """run the TextRank algorithm"""
+
+  graph = build_graph(json_iter(path))
+  ranks = nx.pagerank(graph)
+
+  return graph, ranks
+
+
 
 
 ######################################################################
@@ -301,8 +334,8 @@ def find_chunk (phrase, np):
     if parsed_np:
       return parsed_np
 
-def collect_chunks (phrase):
-  """collect the noun phrases"""
+def enumerate_chunks (phrase):
+  """iterate through the noun phrases"""
 
   if (len(phrase) > 1):
     found = False
@@ -317,91 +350,154 @@ def collect_chunks (phrase):
       yield text, phrase
 
 
-def normalize_key_phrases (path, ranks):
-  """iterator for the normalized key phrases"""
+def collect_keyword (sent, ranks):
+  """iterator for collecting the single-word keyphrases"""
 
-  # first, collect all the single-word keywords
-  lex = {}
-  max_single_rank = 0.0
+  for w in sent:
+    if (w.word_id > 0) and (w.root in ranks) and (w.pos[0] in "NV"):
+      rl = RankedLexeme(text=w.raw.lower(), rank=ranks[w.root]/2.0, ids=[w.word_id], pos=w.pos.lower(), count=1)
 
-  for meta in json_iter(path):
-    sent = [w for w in map(WordNode._make, meta["graf"])]
-    sent_text = " ".join([w.raw for w in sent])
+      if DEBUG:
+        print(rl)
 
-    if DEBUG:
-      print(sent_text)
+      yield rl
 
-    for w in sent:
-      if (w.word_id > 0) and (w.root in ranks) and (w.pos[0] in "NV"):
-        rl = RankedLexeme(text=w.raw.lower(), rank=ranks[w.root], ids=[w.word_id], pos=w.pos.lower())
 
-        if DEBUG:
-          print(rl)
+def collect_phrases (sent, ranks):
+  """iterator for collecting the noun phrases"""
 
-        lex[str(rl.ids)] = rl
-        max_single_rank = max(max_single_rank, rl.rank)
+  tail = 0
+  last_idx = sent[0].idx - 1
+  phrase = []
 
-    # then collect the noun phrases
-    tail = 0
-    last_idx = sent[0].idx - 1
-    phrase = []
+  while tail < len(sent):
+    w = sent[tail]
 
-    while tail < len(sent):
-      w = sent[tail]
-
-      if (w.word_id > 0) and (w.root in ranks) and ((w.idx - last_idx) == 1):
-        # keep collecting...
-        rl = RankedLexeme(text=w.raw.lower(), rank=ranks[w.root], ids=[w.word_id], pos=w.pos.lower())
-        phrase.append(rl)
-      else:
-        # just hit a phrase boundary
-        for text, p in collect_chunks(phrase):
-          ids = list(set.union(*[set(rl.ids) for rl in p]))
-          rank = math.sqrt(sum([rl.rank**2.0 for rl in p]))/float(len(p)) + max_single_rank
-          np_rl = RankedLexeme(text=text, rank=rank, ids=ids, pos="np")
+    if (w.word_id > 0) and (w.root in ranks) and ((w.idx - last_idx) == 1):
+      # keep collecting...
+      rl = RankedLexeme(text=w.raw.lower(), rank=ranks[w.root], ids=w.word_id, pos=w.pos.lower(), count=1)
+      phrase.append(rl)
+    else:
+      # just hit a phrase boundary
+      for text, p in enumerate_chunks(phrase):
+        if p:
+          id_list = [rl.ids for rl in p]
+          rank_list = [rl.rank for rl in p]
+          np_rl = RankedLexeme(text=text, rank=rank_list, ids=id_list, pos="np", count=1)
 
           if DEBUG:
             print(np_rl)
 
-          lex[str(np_rl.ids)] = np_rl
+          yield np_rl
 
-        phrase = []
+      phrase = []
 
-      last_idx = w.idx
-      tail += 1
+    last_idx = w.idx
+    tail += 1
 
-  sum_ranks = sum(rl.rank for rl in lex.values())
 
-  for rl in sorted(lex.values(), key=lambda rl: rl.rank, reverse=True):
+def calc_rms (values):
+  """calculate a root-mean-squared metric for a list of float values"""
+  return math.sqrt(sum([x**2.0 for x in values])) / float(len(values))
+
+
+def normalize_key_phrases (path, ranks):
+  single_lex = {}
+  phrase_lex = {}
+
+  for meta in json_iter(path):
+    sent = [w for w in map(WordNode._make, meta["graf"])]
+
+    if DEBUG:
+      print(" ".join([w.raw for w in sent]))
+
+    for rl in collect_keyword(sent, ranks):
+      id = str(rl.ids)
+
+      if id not in single_lex:
+        single_lex[id] = rl
+      else:
+        prev_lex = single_lex[id]
+        single_lex[id] = rl._replace(count = prev_lex.count + 1)
+
+    for rl in collect_phrases(sent, ranks):
+      id = str(rl.ids)
+
+      if id not in phrase_lex:
+        phrase_lex[id] = rl
+      else:
+        prev_lex = phrase_lex[id]
+        phrase_lex[id] = rl._replace(count = prev_lex.count + 1)
+
+  # normalize ranks across single keywords and longer phrases:
+  #  * boost the noun phrases for length
+  #  * penalize the noun phrases for repeated words
+  #  * stack all of the phrases above the single keywords
+
+  rank_list = [rl.rank for rl in single_lex.values()]
+
+  if len(rank_list) < 1:
+    max_single_rank = 0
+  else:
+    max_single_rank = max(rank_list)
+
+  repeated_roots = {}
+
+  for rl in sorted(phrase_lex.values(), key=lambda rl: len(rl), reverse=True):
+    rank_list = []
+
+    for i in iter(range(0, len(rl.ids))):
+      id = rl.ids[i]
+
+      if not id in repeated_roots:
+        repeated_roots[id] = 1.0
+        rank_list.append(rl.rank[i])
+      else:
+        repeated_roots[id] += 1.0
+        rank_list.append(rl.rank[i] / repeated_roots[id])
+
+    phrase_rank = calc_rms(rank_list) + max_single_rank
+    single_lex[str(rl.ids)] = rl._replace(rank = phrase_rank)
+
+  # scale all the ranks together, so they sum to 1.0
+
+  sum_ranks = sum([rl.rank for rl in single_lex.values()])
+
+  for rl in sorted(single_lex.values(), key=lambda rl: rl.rank, reverse=True):
     yield rl._replace(rank=rl.rank / sum_ranks)
 
 
 ######################################################################
 ## sentence significance
 
-def mh_digest (data, num_perm=512):
+def mh_digest (data, force_encode=False):
   """create a MinHash digest"""
+  num_perm = 512
   m = MinHash(num_perm)
 
   for d in data:
-    m.update(d.encode('utf8'))
+    if force_encode:
+      # already encoded...
+      m.update(d)
+    else:
+      m.update(d.encode('utf8'))
 
   return m
 
 
-def rank_kernel (path):
+def rank_kernel (path, force_encode=False):
   """return a list (matrix-ish) of the key phrases and their ranks"""
   kernel = []
 
   for meta in json_iter(path):
     rl = RankedLexeme(**meta)
-    m = mh_digest(map(lambda x: str(x), rl.ids))
+    m = mh_digest(map(lambda x: str(x), rl.ids), force_encode)
     kernel.append((rl, m,))
 
   return kernel
 
 
-def top_sentences (kernel, path):
+def top_sentences (kernel, path, force_encode=False):
   """determine distance for each sentence"""
   key_sent = {}
   i = 0
@@ -411,7 +507,7 @@ def top_sentences (kernel, path):
     tagged_sent = [WordNode._make(x) for x in graf]
     text = " ".join([w.raw for w in tagged_sent])
 
-    m_sent = mh_digest([str(w.word_id) for w in tagged_sent])
+    m_sent = mh_digest([str(w.word_id) for w in tagged_sent], force_encode)
     dist = sum([m_sent.jaccard(m) * rl.rank for rl, m in kernel])
     key_sent[text] = (dist, i)
     i += 1
@@ -432,7 +528,11 @@ def limit_keyphrases (path, phrase_limit=20):
     rl = RankedLexeme(**meta)
     lex.append(rl)
 
-  rank_thresh = statistics.mean([rl.rank for rl in lex])
+  if len(lex) > 0:
+    rank_thresh = statistics.mean([rl.rank for rl in lex])
+  else:
+      rank_thresh = 0
+
   used = 0
 
   for rl in lex:

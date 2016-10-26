@@ -1,9 +1,6 @@
 #!/usr/bin/env python
 # encoding: utf-8
 
-from collections import namedtuple
-import textblob
-
 import sys
 import textrank
 
@@ -19,8 +16,7 @@ if __name__ == "__main__":
   path = sys.argv[1]
   graph, ranks = textrank.text_rank(path)
 
-  if DEBUG:
-    textrank.render_ranks(graph, ranks)
+  textrank.render_ranks(graph, ranks)
 
   # output as JSON
 
